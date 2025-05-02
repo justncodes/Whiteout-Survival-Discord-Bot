@@ -4,6 +4,8 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 import sys
 import os
 import subprocess
+import platform
+import time
 
 def check_and_install_requirements():
     required_packages = {
@@ -17,39 +19,106 @@ def check_and_install_requirements():
         'pyzipper': 'pyzipper'
     }
     
-    def install_package(package_name):
+    ocr_packages = {
+        'numpy': 'numpy',
+        'Pillow': 'Pillow',
+        'opencv-python': 'opencv-python',
+        'easyocr': 'easyocr',
+    }
+
+    torch_packages = ['torch', 'torchvision', 'torchaudio']
+
+    installation_happened = False
+
+    def install_package(package_name, command_args=None):
+        """Installs a package using pip. Allows custom command args."""
+        nonlocal installation_happened
+        if command_args is None:
+            command_args = [sys.executable, "-m", "pip", "install", package_name]
+        else:
+            command_args = [sys.executable, "-m", "pip"] + command_args
+
         try:
             print(f"Installing {package_name}...")
-            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+            print(f"Running command: {' '.join(command_args)}")
+            # Use a timeout for potentially long installs
+            subprocess.check_call(command_args, timeout=1200)
             print(f"{package_name} installed successfully.")
+            installation_happened = True
+            if any(p in package_name.lower() for p in torch_packages):
+                print("Pausing briefly after torch installation...")
+                time.sleep(5)
             return True
-        except subprocess.CalledProcessError:
-            print(f"Error installing {package_name}.")
+        except subprocess.TimeoutExpired:
+            print(f"Error: Installation of {package_name} timed out (10 minutes).")
+            return False
+        except subprocess.CalledProcessError as e:
+            print(f"Error installing {package_name}: {e}")
+            return False
+        except Exception as e:
+            print(f"Unexpected error installing {package_name}: {e}")
             return False
 
-    packages_to_install = []
     try:
         import pkg_resources
         installed_packages = {pkg.key for pkg in pkg_resources.working_set}
     except ImportError:
-        install_package('setuptools')
-        import pkg_resources
-        installed_packages = {pkg.key for pkg in pkg_resources.working_set}
+        # Try installing setuptools if pkg_resources fails (common issue)
+        print("pkg_resources not found, attempting to install setuptools...")
+        install_package('setuptools', ["install", "setuptools"])
+        try:
+            import pkg_resources
+            installed_packages = {pkg.key for pkg in pkg_resources.working_set}
+        except ImportError:
+             print("FATAL: Could not import pkg_resources even after installing setuptools. Cannot check libraries.")
+             sys.exit(1)
 
-    for package, pip_name in required_packages.items():
-        if package.lower() not in installed_packages:
+    packages_to_install = []
+
+    for package_key, pip_name in required_packages.items():
+        if package_key.lower() not in installed_packages:
             packages_to_install.append(pip_name)
 
-    if packages_to_install:
-        print("Missing libraries detected. Starting installation...")
+    for check_name, install_name in ocr_packages.items():
+         if check_name.lower() not in installed_packages:
+             packages_to_install.append(install_name)
+
+    missing_torch = [pkg for pkg in torch_packages if pkg.lower() not in installed_packages]
+
+    if packages_to_install or missing_torch:
+        print("\nMissing libraries detected. Starting installation...")
+
         for package in packages_to_install:
             success = install_package(package)
             if not success:
-                print(f"Some libraries could not be installed. Please run pip install {package} manually.")
+                print(f"ERROR: Failed to install '{package}'. Please try manually: pip install {package}")
                 sys.exit(1)
-        print("All required libraries installed!")
-        return True
-    return False
+
+        if missing_torch:
+            print(f"\nMissing PyTorch components: {', '.join(missing_torch)}. Installing CPU version...")
+            os_name = platform.system()
+            torch_install_args = None
+            cpu_index_url = "https://download.pytorch.org/whl/cpu"
+
+            torch_install_args = ["install"] + torch_packages + ["--index-url", cpu_index_url]
+
+            print(f"Attempting PyTorch CPU install for {os_name}...")
+            success = install_package("PyTorch CPU Components", command_args=torch_install_args)
+            if not success:
+                print(f"ERROR: Failed to install PyTorch components.")
+                print(f"Please try installing manually: pip install {' '.join(torch_packages)} --index-url {cpu_index_url}")
+                print("Bot may not function correctly without PyTorch.")
+                sys.exit(1)
+
+        if installation_happened:
+            print("\nRequired library installation process finished!")
+            if missing_torch:
+                 print("NOTE: PyTorch was installed. A restart of the script might be necessary.")
+            return True
+
+    else:
+        print("All required libraries seem to be installed.")
+        return False
 
 if __name__ == "__main__":
     check_and_install_requirements()
