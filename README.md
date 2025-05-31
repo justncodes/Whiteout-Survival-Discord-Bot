@@ -1,3 +1,6 @@
+# EDIT: THIS CODE IS OUTDATED, DO NOT USE.
+# SEE https://github.com/whiteout-project/bot/tree/main for the latest version of code!
+
 # Applying the CAPTCHA Solver Patch
 
 This guide explains how to manually update your existing bot installation to include the new automatic CAPTCHA solving feature for gift code redemption.
